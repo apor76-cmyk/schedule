@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>일정 관리 앱</title>
+<title>일정 관리 앱 + GitHub Sync</title>
 <style>
 :root{--bg:#f5f6f8;--card:#ffffff;--text:#111;--accent:#4f46e5;--sat:#3b82f6;--sun:#ef4444}
 body.dark{--bg:#0f172a;--card:#111827;--text:#e5e7eb}
 body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
-header{display:flex;gap:8px;padding:12px;background:var(--card);position:sticky;top:0}
+header{display:flex;gap:8px;padding:12px;background:var(--card);position:sticky;top:0;z-index:999;}
 button{border:none;padding:8px 12px;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
 .container{padding:12px}
 .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
@@ -21,13 +21,7 @@ button{border:none;padding:8px 12px;border-radius:8px;background:var(--accent);c
 input,select{padding:6px;border-radius:8px;border:1px solid #ccc}
 .category{padding:4px 8px;border-radius:999px;font-size:12px;display:flex;gap:4px;align-items:center;color:#fff}
 .day.active{outline:2px solid var(--accent)}
-
-body.dark .day {
-  border: 1px solid #374151; /* 다크모드 경계 */
-  box-shadow: 0 2px 6px rgba(0,0,0,0.5); /* 그림자 효과 */
-  background: #1e293b; /* 카드 배경 조금 밝게 */
-  transition:0.3s;
-}
+body.dark .day { border:1px solid #374151; box-shadow:0 2px 6px rgba(0,0,0,0.5); background:#1e293b; transition:0.3s; }
 </style>
 </head>
 <body>
@@ -36,6 +30,9 @@ body.dark .day {
 <button onclick="next()">▶</button>
 <button onclick="toggleView()">주간/월간</button>
 <button onclick="toggleDark()">다크모드</button>
+<button onclick="GitHubSync.syncToGitHub()">🔼 GitHub 올리기</button>
+<button onclick="GitHubSync.syncFromGitHub()">🔽 GitHub 내려받기</button>
+<button onclick="GitHubSync.clearToken()">🔑 토큰 초기화</button>
 <button onclick="backup()">백업</button>
 <button onclick="restore()">불러오기</button>
 </header>
@@ -59,6 +56,7 @@ body.dark .day {
 </div>
 
 <script>
+/* ================== 기본 앱 기능 ================== */
 let current=new Date();
 let selectedDate=new Date();
 let view="month";
@@ -79,41 +77,29 @@ function formatLocal(d){
 }
 
 function render(){
- document.getElementById("title").textContent=view==="month"?
- `${current.getFullYear()}년 ${current.getMonth()+1}월`:
- `${current.toDateString()}`;
-
+ document.getElementById("title").textContent=view==="month"?`${current.getFullYear()}년 ${current.getMonth()+1}월`:current.toDateString();
  date.value=formatLocal(selectedDate);
-
  const grid=document.getElementById("grid");
  grid.innerHTML="";
-
  let start=new Date(current);
  if(view==="month") start=new Date(current.getFullYear(),current.getMonth(),1);
  else start.setDate(current.getDate()-current.getDay());
-
  let days=view==="month"?42:7;
  for(let i=0;i<days;i++){
   let d=new Date(start); d.setDate(start.getDate()+i);
   const key=formatLocal(d);
   const dayOfWeek=d.getDay();
-
   const div=document.createElement("div");
-  div.className="day"+(key===formatLocal(selectedDate)?" active":"")+
-   (dayOfWeek===6?" sat":"")+
-   (dayOfWeek===0?" sun":"");
-
+  div.className="day"+(key===formatLocal(selectedDate)?" active":"")+(dayOfWeek===6?" sat":"")+(dayOfWeek===0?" sun":"");
   div.dataset.date=key;
   div.onclick=()=>{selectedDate=new Date(d);render();};
   div.ondragover=e=>e.preventDefault();
   div.ondrop=e=>dropEvent(key);
   div.innerHTML=`<h4>${d.getDate()}</h4>`;
-
   (store[key]||[]).forEach((e,idx)=>{
     const cat=categories.find(c=>c.name===e.category);
     const ev=document.createElement("div");
-    ev.className="event";
-    ev.draggable=true;
+    ev.className="event"; ev.draggable=true;
     ev.style.background=cat?.color+"33";
     ev.innerHTML=`<span>[${e.category}] ${e.text}</span><span onclick="delEvent('${key}',${idx})">✕</span>`;
     ev.ondragstart=()=>dragData={from:key,index:idx};
@@ -134,63 +120,60 @@ function addEvent(){
 }
 
 function delEvent(date,i){store[date].splice(i,1);render();}
-
-function dropEvent(date){
- if(!dragData) return;
- const item=store[dragData.from][dragData.index];
- store[dragData.from].splice(dragData.index,1);
- if(!store[date]) store[date]=[];
- store[date].push(item);
- dragData=null;
- render();
-}
-
-function addCategory(){
- const name=newCat.value.trim();
- const color=catColor.value;
- if(!name) return;
- categories.push({name,color});
- renderCats(); save();
-}
-
-function delCat(i){categories.splice(i,1);renderCats();save();}
-
-function renderCats(){
- category.innerHTML=""; catList.innerHTML="";
- categories.forEach((c,i)=>{
-  const o=document.createElement("option"); o.textContent=c.name; category.appendChild(o);
-  const chip=document.createElement("div"); chip.className="category";
-  chip.style.background=c.color;
-  chip.innerHTML=`${c.name}<span onclick="delCat(${i})">✕</span>`;
-  catList.appendChild(chip);
- });
-}
-
+function dropEvent(date){if(!dragData) return; const item=store[dragData.from][dragData.index]; store[dragData.from].splice(dragData.index,1); if(!store[date]) store[date]=[]; store[date].push(item); dragData=null; render();}
+function addCategory(){const name=newCat.value.trim(); const color=catColor.value; if(!name)return; categories.push({name,color}); renderCats(); save();}
+function delCat(i){categories.splice(i,1); renderCats(); save();}
+function renderCats(){category.innerHTML=""; catList.innerHTML=""; categories.forEach((c,i)=>{ const o=document.createElement("option"); o.textContent=c.name; category.appendChild(o); const chip=document.createElement("div"); chip.className="category"; chip.style.background=c.color; chip.innerHTML=`${c.name}<span onclick="delCat(${i})">✕</span>`; catList.appendChild(chip); });}
 function prev(){view==="month"?current.setMonth(current.getMonth()-1):current.setDate(current.getDate()-7);render();}
 function next(){view==="month"?current.setMonth(current.getMonth()+1):current.setDate(current.getDate()+7);render();}
 function toggleView(){view=view==="month"?"week":"month";render();}
 function toggleDark(){document.body.classList.toggle("dark");}
+function backup(){const blob=new Blob([JSON.stringify({store,categories})],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="schedule-backup.json"; a.click();}
+function restore(){const input=document.createElement("input"); input.type="file"; input.onchange=e=>{ const reader=new FileReader(); reader.onload=()=>{ const obj=JSON.parse(reader.result); store=obj.store||{}; categories=obj.categories||[]; render(); }; reader.readAsText(e.target.files[0]); }; input.click();}
+/* ================== GitHub Sync ================== */
+const GITHUB_INFO={ user:"apor76-cmyk", repo:"scheduledata", path:"schedule_sync.json" };
+const GH_API=`https://api.github.com/repos/${GITHUB_INFO.user}/${GITHUB_INFO.repo}/contents/${GITHUB_INFO.path}`;
+const GH_RAW=`https://raw.githubusercontent.com/${GITHUB_INFO.user}/${GITHUB_INFO.repo}/main/${GITHUB_INFO.path}`;
 
-function backup(){
- const blob=new Blob([JSON.stringify({store,categories})],{type:"application/json"});
- const a=document.createElement("a");
- a.href=URL.createObjectURL(blob);
- a.download="schedule-backup.json"; a.click();
+function getToken(){ let token=localStorage.getItem("GH_TOKEN"); if(!token){ token=prompt("GitHub Token 입력 (repo read/write 필요)"); if(token)localStorage.setItem("GH_TOKEN",token); } return token; }
+function clearToken(){ localStorage.removeItem("GH_TOKEN"); alert("토큰 삭제됨"); }
+function getSyncData(){ return { store:localStorage.getItem("scheduleStore")||"{}", categories:localStorage.getItem("scheduleCats")||"{}" }; }
+function applySyncData(d){ if(!d)return; if(d.store)localStorage.setItem("scheduleStore",d.store); if(d.categories)localStorage.setItem("scheduleCats",d.categories); render(); }
+
+function mergeJSON(localStr,remoteStr){ try{ const local=JSON.parse(localStr||"{}"); const remote=JSON.parse(remoteStr||"{}"); return JSON.stringify({...remote,...local}); }catch{return localStr||"{}";} }
+
+async function syncFromGitHub(){
+ try{
+  const res=await fetch(GH_RAW+"?t="+Date.now());
+  if(!res.ok){ alert("⚠️ GitHub에 파일 없음"); return; }
+  const remoteData=await res.json();
+  const localData=getSyncData();
+  const merged={ store:mergeJSON(localData.store,remoteData.store), categories:mergeJSON(localData.categories,remoteData.categories) };
+  applySyncData(merged);
+  alert("✅ GitHub 데이터 내려받기 완료!");
+ }catch(e){ console.log(e); alert("❌ 내려받기 실패"); }
 }
 
-function restore(){
- const input=document.createElement("input"); input.type="file";
- input.onchange=e=>{
-  const reader=new FileReader();
-  reader.onload=()=>{
-    const obj=JSON.parse(reader.result);
-    store=obj.store||{}; categories=obj.categories||[]; render();
-  };
-  reader.readAsText(e.target.files[0]);
- };
- input.click();
+async function syncToGitHub(){
+ try{
+  const token=getToken(); if(!token) return;
+  const data=getSyncData();
+  let sha=null;
+  const fileRes=await fetch(GH_API,{ headers:{Authorization:`token ${token}`}});
+  if(fileRes.ok){ const j=await fileRes.json(); sha=j.sha; }
+  const content=btoa(unescape(encodeURIComponent(JSON.stringify(data,null,2))));
+  const res=await fetch(GH_API,{
+    method:"PUT",
+    headers:{ Authorization:`token ${token}`, "Content-Type":"application/json" },
+    body:JSON.stringify({ message:"auto sync", content, sha })
+  });
+  if(res.ok) alert("✅ GitHub 데이터 올리기 완료!"); else{ const err=await res.json(); alert("❌ 올리기 실패: "+(err.message||"Unknown")); }
+ }catch(e){ console.log(e); alert("❌ GitHub 올리기 실패"); }
 }
 
+const GitHubSync={ syncToGitHub, syncFromGitHub, clearToken };
+
+/* ================== 초기 로드 ================== */
 render();
 </script>
 </body>
